@@ -1,0 +1,968 @@
+<%'/*
+'**********************************************
+'      /\      | (_)
+'     /  \   __| |_  __ _ _ __  ___
+'    / /\ \ / _` | |/ _` | '_ \/ __|
+'   / ____ \ (_| | | (_| | | | \__ \
+'  /_/    \_\__,_| |\__,_|_| |_|___/
+'               _/ | Digital Agency
+'              |__/
+'**********************************************
+'* Project  : RabbitCMS
+'* Developer: <Anthony Burak DURSUN>
+'* E-Mail   : badursun@adjans.com.tr
+'* Corp     : https://adjans.com.tr
+'**********************************************
+' LAST UPDATE: 28.10.2022 15:33 @badursun
+'**********************************************
+' Class Structure for RabbitCMS PluginManagers
+' 	- Private and Public Variables
+' 	- class_register()
+' 	- LoadPanel()
+' 	- class_initialize()
+' 	- class_terminate()
+' 	- class_register()
+' 	- GET PluginCode()
+' 	- GET PluginName()
+' 	- GET PluginVersion()
+' 	- GET PluginCredits()
+' 	- GET AutoLoad()
+
+' 	- YOUR SUB/FUNC/PROPERTY
+' 	- YOUR SUB/FUNC/PROPERTY
+' 	- YOUR SUB/FUNC/PROPERTY
+'**********************************************
+' Response.Charset = "UTF-8"
+' Response.Codepage = 65001
+' Response.codepage = 1254
+' Response.charset = "windows-1254"
+'*/
+Class Stripe_Payment_Plugin
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Variables
+	'---------------------------------------------------------------
+	'*/
+	Private PLUGIN_CODE, PLUGIN_DB_NAME, PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_CREDITS, PLUGIN_GIT, PLUGIN_DEV_URL, PLUGIN_FILES_ROOT, PLUGIN_ICON, PLUGIN_REMOVABLE, PLUGIN_ROOT, PLUGIN_FOLDER_NAME, PLUGIN_AUTOLOAD
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Variables
+	'---------------------------------------------------------------
+	'*/
+	Private API_KEY, API_SECRET, PLUGIN_STATUS, API_PAYMENT_CHARGES_URL, API_CREATE_CHECKOUT_SESSION_URL, SUPPORTED_CURRENCY, API_CONTROL_CHECKOUT_SESSION_URL
+	Private PAYMENT_AMOUNT, PAYMENT_CURRENCY, PAYMENT_SOURCE, PAYMENT_DESCRIPTION, PAYMENT_CUSTOMER_EMAIL, PAYMEMENT_ORDER_ID
+	Public USER_CART, PAYMENT_FAILED_URL, PAYMENT_SUCCESS_URL, PAYMENT_CANCEL_URL, PAYMENT_UI_MODE
+    
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Register Class
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get class_register()
+		DebugTimer ""& PLUGIN_CODE &" class_register() Start"
+		'/*
+		'---------------------------------------------------------------
+		' Check Register
+		'---------------------------------------------------------------
+		'*/
+		If CheckSettings("PLUGIN:"& PLUGIN_CODE &"") = True Then 
+			DebugTimer ""& PLUGIN_CODE &" class_registered"
+			Exit Property
+		End If
+		'/*
+		'---------------------------------------------------------------
+		' Plugin Database
+		'---------------------------------------------------------------
+		'*/
+		Dim PluginTableName
+			PluginTableName = "tbl_plugin_" & PLUGIN_DB_NAME
+
+    	If TableExist(PluginTableName) = False Then
+			DebugTimer ""& PLUGIN_CODE &" table creating"
+    		
+    		Conn.Execute("SET NAMES utf8mb4;") 
+    		Conn.Execute("SET FOREIGN_KEY_CHECKS = 0;") 
+    		
+    		Conn.Execute("DROP TABLE IF EXISTS `"& PluginTableName &"`")
+
+    		q="CREATE TABLE `"& PluginTableName &"` ( "
+    		q=q+"  `ID` int(11) NOT NULL AUTO_INCREMENT, "
+    		q=q+"  `ORDER_ID` bigint(20) DEFAULT 0, "
+    		q=q+"  `ORDER_NO` bigint(20) DEFAULT 0, "
+    		q=q+"  `STRIPE_ID` varchar(100) DEFAULT '', "
+    		q=q+"  `CLOSED` int(1) DEFAULT 0, "
+    		q=q+"  `CLOSED_DATE` datetime DEFAULT NULL, "
+    		q=q+"  PRIMARY KEY (`ID`), "
+    		q=q+"  UNIQUE KEY `IND2` (`ORDER_NO`), "
+    		q=q+"  KEY `IND1` (`ORDER_NO`) "
+    		q=q+") ENGINE=MyISAM AUTO_INCREMENT=20 DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci; "
+			Conn.Execute(q) : q=""
+
+    		Conn.Execute("SET FOREIGN_KEY_CHECKS = 1;") 
+
+			' Create Log
+			'------------------------------
+    		Call PanelLog(""& PLUGIN_CODE &" için database tablosu oluşturuldu", 0, ""& PLUGIN_CODE &"", 0)
+
+			' Register Settings
+			'------------------------------
+			DebugTimer ""& PLUGIN_CODE &" class_register() End"
+    	End If
+		'/*
+		'---------------------------------------------------------------
+		' Plugin Settings
+		'---------------------------------------------------------------
+		'*/
+		a=GetSettings("PLUGIN:"& PLUGIN_CODE &"", PLUGIN_CODE&"_")
+		a=GetSettings(""&PLUGIN_CODE&"_CLASS", "Stripe_Payment_Plugin")
+		a=GetSettings(""&PLUGIN_CODE&"_REGISTERED", ""& Now() &"")
+		a=GetSettings(""&PLUGIN_CODE&"_FOLDER", PLUGIN_FOLDER_NAME)
+		a=GetSettings(""&PLUGIN_CODE&"_CODENO", "338")
+		a=GetSettings(""&PLUGIN_CODE&"_PLUGIN_NAME", PLUGIN_NAME)
+		'/*
+		'---------------------------------------------------------------
+		' Register Settings
+		'---------------------------------------------------------------
+		'*/
+		DebugTimer ""& PLUGIN_CODE &" class_register() End"
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Register Class End
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Settings Panel
+	'---------------------------------------------------------------
+	'*/
+	Public sub LoadPanel()
+		'/*
+		'--------------------------------------------------------
+		' Sub Page
+		'--------------------------------------------------------
+		'*/
+		If Query.Data("Page") = "SHOW:CachedFiles" Then
+			Call PluginPage("Header")
+
+			Call PluginPage("Footer")
+			Call SystemTeardown("destroy")
+		End If
+		'/*
+		'--------------------------------------------------------
+		' Main Page
+		'--------------------------------------------------------
+		'*/
+		With Response
+			'------------------------------------------------------------------------------------------
+				PLUGIN_PANEL_MASTER_HEADER This()
+			'------------------------------------------------------------------------------------------
+			.Write "<div class=""row"">"
+			.Write "    <div class=""col-lg-6 col-sm-12"">"
+			.Write 			QuickSettings("input", ""& PLUGIN_CODE &"_API_KEY", "Publishable key", "", TO_DB)
+			.Write "    </div>"
+			.Write "    <div class=""col-lg-6 col-sm-12"">"
+			.Write 			QuickSettings("input", ""& PLUGIN_CODE &"_API_SECRET", "Secret key", "", TO_DB)
+			.Write "    </div>"
+
+			.Write "    <div class=""col-lg-12 col-sm-12"">"
+			.Write 			QuickSettings("input", ""& PLUGIN_CODE &"_API_BASE_URL", "API Base URL", "", TO_DB)
+			.Write "    </div>"
+
+			.Write "    <div class=""col-lg-4 col-sm-12"">"
+			.Write 			PLUGIN_PANEL_INPUT(This, "select", "DEFAULT_CURRENCY", "Default Currency", Join(SUPPORTED_CURRENCY,"|"), TO_DB)
+			.Write "	<small style='margin-top:-20px;display:block;'>* ile işaretli para birimleri American Express tarafından desteklenmez.</small>"
+			.Write "    </div>"
+			.Write "    <div class=""col-lg-4 col-sm-12"">"
+			.Write 			PLUGIN_PANEL_INPUT(This, "select", "DEFAULT_SOURCE", "Default Source", "tok_visa#tok_visa", TO_DB)
+			.Write "    </div>"
+			.Write "    <div class=""col-lg-4 col-sm-12"">"
+			.Write 			PLUGIN_PANEL_INPUT(This, "select", "PAYMENT_UI_MODE", "Payment UI Mode", "hosted#Hosted|embedded#Embedded", TO_DB)
+			.Write "    </div>"
+			.Write "</div>"
+
+			' .Write "<div class=""row"">"
+			' .Write "    <div class=""col-lg-12 col-sm-12"">"
+			' .Write "        <a open-iframe href=""ajax.asp?Cmd=PluginSettings&PluginName="& PLUGIN_CODE &"&Page=SHOW:CachedFiles"" class=""btn btn-sm btn-primary"">"
+			' .Write "        	Önbelleklenmiş Dosyaları Göster"
+			' .Write "        </a>"
+			' .Write "        <a open-iframe href=""ajax.asp?Cmd=PluginSettings&PluginName="& PLUGIN_CODE &"&Page=DELETE:CachedFiles"" class=""btn btn-sm btn-danger"">"
+			' .Write "        	Tüm Önbelleği Temizle"
+			' .Write "        </a>"
+			' .Write "    </div>"
+			' .Write "</div>"
+		End With
+	End Sub
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Settings Panel
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Class Initialize
+	'---------------------------------------------------------------
+	'*/
+	Private Sub class_initialize()
+		'/*
+		'-----------------------------------------------------------------------------------
+		' REQUIRED: PluginTemplate Main Variables
+		'-----------------------------------------------------------------------------------
+		'*/
+    	PLUGIN_CODE  			= "STRIPE_PLUGIN"
+    	PLUGIN_NAME 			= "Stripe Payment Plugin"
+    	PLUGIN_VERSION 			= "1.0.0"
+    	PLUGIN_GIT 				= "https://github.com/RabbitCMS-Hub/Stripe-Payment-Plugin"
+    	PLUGIN_DEV_URL 			= "https://adjans.com.tr"
+    	PLUGIN_ICON 			= "zmdi-paypal"
+    	PLUGIN_CREDITS 			= "@badursun Anthony Burak DURSUN"
+    	PLUGIN_FOLDER_NAME 		= "Stripe-Payment-Plugin"
+    	PLUGIN_DB_NAME 			= "plugin_stripe_db"
+    	PLUGIN_REMOVABLE 		= True
+    	PLUGIN_AUTOLOAD 		= True
+    	PLUGIN_ROOT 			= PLUGIN_DIST_FOLDER_PATH(This)
+    	PLUGIN_FILES_ROOT 		= PLUGIN_VIRTUAL_FOLDER(This)
+		'/*
+    	'-------------------------------------------------------------------------------------
+    	' PluginTemplate Main Variables
+    	'-------------------------------------------------------------------------------------
+		'*/
+		PLUGIN_STATUS 			= Cint(GetSettings(PLUGIN_CODE&"_ACTIVE","0"))
+		API_KEY 				= GetSettings(PLUGIN_CODE&"_API_KEY", "")
+		API_SECRET 				= GetSettings(PLUGIN_CODE&"_API_SECRET", "")
+		API_BASE_URL 			= GetSettings(PLUGIN_CODE&"_API_BASE_URL", "https://api.stripe.com/v1/")
+		PAYMENT_UI_MODE			= GetSettings(PLUGIN_CODE&"_PAYMENT_UI_MODE", "hosted") '"embedded" ' hosted, embedded
+		
+		API_PAYMENT_CHARGES_URL 		= API_BASE_URL & "charges"
+		API_CREATE_CHECKOUT_SESSION_URL = API_BASE_URL & "checkout/sessions"
+		API_CONTROL_CHECKOUT_SESSION_URL= API_BASE_URL & "checkout/sessions/" ' add id
+
+		PAYMENT_AMOUNT 			= 0
+		PAYMENT_CURRENCY 		= GetSettings(PLUGIN_CODE&"_DEFAULT_CURRENCY", "USD")
+		PAYMENT_SOURCE 			= GetSettings(PLUGIN_CODE&"_DEFAULT_SOURCE", "tok_visa")
+		PAYMENT_DESCRIPTION 	= ""
+		PAYMENT_CUSTOMER_EMAIL 	= ""
+		PAYMEMENT_ORDER_ID 		= ""
+
+		PAYMENT_FAILED_URL 		= ""
+		PAYMENT_SUCCESS_URL 	= ""
+		PAYMENT_CANCEL_URL 		= ""
+
+		USER_CART 				= Array()
+
+		SUPPORTED_CURRENCY 		= Split("USD#USD,AED#AED,AFN#AFN *,ALL#ALL,AMD#AMD,ANG#ANG,AOA#AOA *,ARS#ARS *,AUD#AUD,AWG#AWG,AZN#AZN,BAM#BAM,BBD#BBD,BDT#BDT,BGN#BGN,BIF#BIF,BMD#BMD,BND#BND,BOB#BOB *,BRL#BRL *,BSD#BSD,BWP#BWP,BYN#BYN,BZD#BZD,CAD#CAD,CDF#CDF,CHF#CHF,CLP#CLP *,CNY#CNY,COP#COP *,CRC#CRC *,CVE#CVE *,CZK#CZK,DJF#DJF *,DKK#DKK,DOP#DOP,DZD#DZD,EGP#EGP,ETB#ETB,EUR#EUR,FJD#FJD,FKP#FKP *,GBP#GBP,GEL#GEL,GIP#GIP,GMD#GMD,GNF#GNF *,GTQ#GTQ *,GYD#GYD,HKD#HKD,HNL#HNL *,HTG#HTG,HUF#HUF,IDR#IRD,ILS#ILS,INR#INR,ISK#ISK,JMD#JMD,JPY#JPY,KES#KES,KGS#KGS,KHR#KHR,KMF#KMF,KRW#KRW,KYD#KYD,KZT#KZT,LAK#LAK *,LBP#LBP,LKR#LKR,LRD#LRD,LSL#LSL,MAD#MAD,MDL#MDL,MGA#MGA,MKD#MKD,MMK#MMK,MNT#MNT,MOP#MOP,MUR#MUR *,MVR#MVR,MWK#MWK,MXN#MXN,MYR#MYR,MZN#MZN,NAD#NAD,NGN#NGN,NIO#NIO *,NOK#NOK,NPR#NPR,NZD#NZD,PAB#PAB *,PEN#PEN *,PGK#PGK,PHP#PHP,PKR#PKR,PLN#PLN,PYG#PYG *,QAR#QAR,RON#RON,RSD#RSD,RUB#RUB,RWF#RWF,SAR#SAR,SBD#SBG,SCR#SCR,SEK#SEK,SGD#SGD,SHP#SHP *,SLE#SLE,SOS#SOS,SRD#SRD *,STD#STD *,SZL#SZL,THB#THB,TJS#TJS,TOP#TOP,TRY#TRY,TTD#TTD,TWD#TWD,TZS#TZS,UAH#UAH,UGX#UGX,UYU#UYU *,UZS#UZS,VND#VND,VUV#VUV,WST#WST,XAF#XAF,XCD#XCD,XOF#XOF *,XPF#XPF *,YER#YER,ZAR#ZAR,ZMW#ZMW", ",")
+		'/*
+		'-----------------------------------------------------------------------------------
+		' REQUIRED: Register Plugin to CMS
+		'-----------------------------------------------------------------------------------
+		'*/
+		class_register()
+		'/*
+		'-----------------------------------------------------------------------------------
+		' REQUIRED: Hook Plugin to CMS Auto Load Location WEB|API|PANEL
+		'-----------------------------------------------------------------------------------
+		'*/
+		If PLUGIN_AUTOLOAD_AT("WEB") = True AND PLUGIN_STATUS = 1 Then 
+			' Cms.BodyData = Init()
+			' Cms.FooterData = "<add-footer-html>Hello World!</add-footer-html>"
+		End If
+	End Sub
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Class Initialize
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Class Terminate
+	'---------------------------------------------------------------
+	'*/
+	Private sub class_terminate()
+
+	End Sub
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Class Terminate
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Manager Exports
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get PluginCode() 		: PluginCode = PLUGIN_CODE 					: End Property
+	Public Property Get PluginName() 		: PluginName = PLUGIN_NAME 					: End Property
+	Public Property Get PluginVersion() 	: PluginVersion = PLUGIN_VERSION 			: End Property
+	Public Property Get PluginGit() 		: PluginGit = PLUGIN_GIT 					: End Property
+	Public Property Get PluginDevURL() 		: PluginDevURL = PLUGIN_DEV_URL 			: End Property
+	Public Property Get PluginFolder() 		: PluginFolder = PLUGIN_FILES_ROOT 			: End Property
+	Public Property Get PluginIcon() 		: PluginIcon = PLUGIN_ICON 					: End Property
+	Public Property Get PluginRemovable() 	: PluginRemovable = PLUGIN_REMOVABLE 		: End Property
+	Public Property Get PluginCredits() 	: PluginCredits = PLUGIN_CREDITS 			: End Property
+	Public Property Get PluginRoot() 		: PluginRoot = PLUGIN_ROOT 					: End Property
+	Public Property Get PluginFolderName() 	: PluginFolderName = PLUGIN_FOLDER_NAME 	: End Property
+	Public Property Get PluginDBTable() 	: PluginDBTable = IIf(Len(PLUGIN_DB_NAME)>2, "tbl_plugin_"&PLUGIN_DB_NAME, "") 	: End Property
+	Public Property Get PluginAutoload() 	: PluginAutoload = PLUGIN_AUTOLOAD 			: End Property
+
+	Private Property Get This()
+		This = Array(PluginCode, PluginName, PluginVersion, PluginGit, PluginDevURL, PluginFolder, PluginIcon, PluginRemovable, PluginCredits, PluginRoot, PluginFolderName, PluginDBTable, PluginAutoload)
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' REQUIRED: Plugin Manager Exports
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' CCS
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get CreateCheckoutSession()
+		If Len(PAYMENT_CANCEL_URL) = 0 Then 
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_DEFINE_CANCEL_URL"
+			Call SystemTeardown("destroy")
+			Exit Property
+		End If
+
+		If Len(PAYMENT_FAILED_URL) = 0 Then 
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_DEFINE_FAIL_URL"
+			Call SystemTeardown("destroy")
+			Exit Property
+		End If
+
+		If Len(PAYMENT_SUCCESS_URL) = 0 Then 
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_DEFINE_SUCCESS_URL"
+			Call SystemTeardown("destroy")
+			Exit Property
+		End If
+
+	    Set oJSON = New aspJSON
+	        With oJSON.data
+	            .Add "client_reference_id"		, PAYMEMENT_ORDER_ID
+	            .Add "currency"					, PAYMENT_CURRENCY
+	            .Add "customer_email"			, PAYMENT_CUSTOMER_EMAIL
+	            .Add "mode" 					, "payment" ' payment, setup, subscription
+	            .Add "ui_mode" 					, PAYMENT_UI_MODE
+
+                .Add "line_items", oJSON.Collection()
+                With oJSON.data("line_items")
+	                For cartCount=0 To UBound(USER_CART)
+	                    .Add cartCount, oJSON.Collection()
+	                    With .item(cartCount)
+			                .Add "price_data" 			, oJSON.Collection()
+			                With .item("price_data")
+			                    .Add "currency" 				, PAYMENT_CURRENCY
+			                	.Add "product_data" 			, oJSON.Collection()
+				                With .item("product_data")
+				                    .Add "name" 				, USER_CART(cartCount)(2)
+				                    .Add "description" 			, USER_CART(cartCount)(2)
+				                    
+				                    .Add "images" 				, oJSON.Collection()
+				                    With .item("images")
+				                    	.Add 0 				, USER_CART(cartCount)(3)
+				                    End With
+				                End With
+			                	.Add "unit_amount" 			, fixAmount( USER_CART(cartCount)(0) )
+			                End With
+		                    .Add "quantity" 			, USER_CART(cartCount)(1)
+	                    End With
+	                Next
+                End With
+
+	            If in_array(PAYMENT_UI_MODE, Array("custom", "embedded"), True)=True Then 
+	            .Add "return_url" 				, PAYMENT_SUCCESS_URL
+	        	End If
+
+	            If PAYMENT_UI_MODE = "hosted" Then
+	            .Add "success_url" 				, PAYMENT_SUCCESS_URL
+	        	End If
+	            
+	            If PAYMENT_UI_MODE = "hosted" Then
+	            .Add "cancel_url" 				, PAYMENT_CANCEL_URL
+	        	End If
+	        End With
+
+	        POST_DATA = jsonFormStringify(oJSON.data, "")
+	    Set oJSON = Nothing
+
+		RESULT 		= XMLHttp(API_CREATE_CHECKOUT_SESSION_URL, "POST", POST_DATA)
+
+	    If RESULT(0) = 200 Then 
+
+			Set parsedDate = New aspJSON
+				parsedDate.loadJSON( RESULT(1) )
+	    		
+				If TypeName(parsedDate.data("error")) = "Empty" Then 
+					' Log Table
+					Conn.Execute("REPLACE INTO "& PluginDBTable() &"(ORDER_ID,ORDER_NO,STRIPE_ID) VALUES('"& OrderID2DBId(PAYMEMENT_ORDER_ID) &"','"& PAYMEMENT_ORDER_ID &"','"& parsedDate.data("id") &"')")
+
+					' Return Results
+					CLIENT_SECRET = ""
+					If PAYMENT_UI_MODE = "embedded" Then
+						CLIENT_SECRET = parsedDate.data("client_secret")
+					End If
+					CreateCheckoutSession = Array(RESULT(0), parsedDate.data("url"), parsedDate.data("id"), CLIENT_SECRET)
+				Else
+					CreateCheckoutSession = Array(500, "Hata!!!", "", "")
+					
+					LOG_URL 	= ExtractReqId( parsedDate.data("error").item("request_log_url") )
+					ERROR_TEXT 	= "Message: "& parsedDate.data("error").item("message") &" Log: "& LOG_URL &""
+					PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: "& ERROR_TEXT &""
+					Call SystemTeardown("destroy")
+				End If
+			Set parsedDate = Nothing
+	    Else 
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_CCS-"& RESULT(0) &""
+			Call SystemTeardown("destroy")
+	    End If
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get ControlCheckoutSession(ByVal OrderDbId)
+		ControlCheckoutSession = 0
+
+		' find Stripe Id
+		STRIPE_ID 	= GetStripeId(OrderDbId)
+		If STRIPE_ID(0) = "0" Then 
+			Exit Property
+		End If
+
+		' Pre Control
+		Set preControl = Conn.Execute("SELECT CLOSED FROM "& PluginDBTable() &" WHERE ID="& STRIPE_ID(1) &"")
+		If Not preControl.Eof Then 
+			If preControl("CLOSED").Value = 1 Then 
+				ControlCheckoutSession = 1
+				Exit Property
+			End If
+		End If 
+		preControl.Close : Set preControl = Nothing
+
+		RESULT 		= XMLHttp(API_CONTROL_CHECKOUT_SESSION_URL&STRIPE_ID(0), "GET", "")
+	    If RESULT(0) = 200 Then 
+			Set parseJsonData = New aspJSON
+				parseJsonData.loadJSON( RESULT(1) )
+
+				STATUS 			= Cstr(parseJsonData.data("status"))
+				PAYMENT_STATUS 	= Cstr(parseJsonData.data("payment_status"))
+
+				Select Case PAYMENT_STATUS
+					Case "paid"
+						Conn.Execute("UPDATE "& PluginDBTable() &" SET CLOSED=1, CLOSED_DATE=NOW() WHERE ID="& STRIPE_ID(1) &" AND CLOSED=0")
+						ControlCheckoutSession = 1
+					Case "unpaid"
+						ControlCheckoutSession = 0
+					Case "no_payment_required"
+						ControlCheckoutSession = 1
+					Case Else 
+						ControlCheckoutSession = 0
+				End Select
+			Set parseJsonData = Nothing
+	    Else 
+	    	ControlCheckoutSession = 0
+	    End If
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get charges()
+		POST_DATA 	= "amount="& PAYMENT_AMOUNT &"&currency="& PAYMENT_CURRENCY &"&source="& PAYMENT_SOURCE &"&description="& PAYMENT_DESCRIPTION &"&receipt_email"
+		RESULT 		= XMLHttp(API_PAYMENT_CHARGES_URL, "POST", POST_DATA)
+
+	    If RESULT(0) = 200 Then 
+			Set parseJsonData = New aspJSON
+				parseJsonData.loadJSON( RESULT(1) )
+
+	    		ID 			= parseJsonData.data("id")
+	    		AMOUNT 		= parseJsonData.data("amount")
+	    		LIVE_MODE 	= parseJsonData.data("livemode")
+	    		FORM_URL 	= parseJsonData.data("receipt_url")
+			Set parseJsonData = Nothing
+			
+			Response.Write "<div>ID: "& ID &"</div>"
+			Response.Write "<div>AMOUNT: "& AMOUNT &"</div>"
+			Response.Write "<div>LIVE_MODE: "& LIVE_MODE &"</div>"
+			Response.Write "<div>FORM_URL: "& FORM_URL &"</div>"
+	    Else 
+	    	Response.Write "Error"
+	    End If
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let PaymentAmount(ByVal Val)
+		Dim PayAmount
+			PayAmount = FormatCurrencyValue(Val)
+
+		If PayAmount = "0" Then 
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_AMOUNT"
+			Call SystemTeardown("destroy")
+			Exit Property
+		Else 
+			PAYMENT_AMOUNT = PayAmount
+		End If
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let PaymentCurrency(ByVal Val)
+		Dim PayCurrency
+			PayCurrency = Val
+
+		If Not Len(PayCurrency) = 3 Then
+			PaymentErrors "Failed", "Ödeme işlemi esnasında bir sorun oluştu. Hata Kodu: SPP_CURRENCY_INVALID"
+			Call SystemTeardown("destroy")
+		Else
+			PAYMENT_CURRENCY = LCase(PayCurrency)
+		End If
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let PaymentDescription(ByVal Val)
+		PAYMENT_DESCRIPTION = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let OrderId(ByVal Val)
+		PAYMEMENT_ORDER_ID = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let CustomerEMail(ByVal Val)
+		PAYMENT_CUSTOMER_EMAIL = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let SuccessURL(ByVal Val)
+		PAYMENT_SUCCESS_URL = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let CancelURL(ByVal Val)
+		PAYMENT_CANCEL_URL = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let FailedURL(ByVal Val)
+		PAYMENT_FAILED_URL = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Function FormatCurrencyValue(ByVal inputVal)
+	    Set regEx = New RegExp
+	    	regEx.Pattern = "^\d{1,3}(\.\d{3})*(,\d{2})?$|^\d{1,3}(,\d{3})*(\.\d{2})?$"
+	    	regEx.IgnoreCase = True
+	    isCurrency = regEx.Test(inputVal)
+
+	    If isCurrency Then
+	        inputVal = Replace(inputVal, ".", "")
+	        inputVal = Replace(inputVal, ",", "")
+
+	        numericValue = CLng(inputVal)
+	    Else
+	        numericValue = 0
+	    End If
+
+	    FormatCurrencyValue = numericValue
+	    Set regEx = Nothing
+	End Function
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Private Property Get XMLHttp(Uri, xType, API_REQUEST_DATA)
+		XMLHttp = Array(0, "XMLHttp: Plugin Aktif Değil ["& PLUGIN_STATUS &"]")
+
+		If PLUGIN_STATUS = 0 Then Exit Property
+
+		'------------------------------------------------
+		' ByPass Error
+		'------------------------------------------------
+		On Error Resume Next
+
+		'------------------------------------------------
+		' Send Data
+		'------------------------------------------------
+	    Set objXMLhttp = Server.CreateObject("MSXML2.ServerXMLHTTP.6.0") ' "MSXML2.ServerXMLHTTP"
+			objXMLhttp.open xType, Uri, false
+            objXMLhttp.setOption(2) = SXH_SERVER_CERT_IGNORE_ALL_SERVER_ERRORS
+            objXMLhttp.setTimeouts 5000, 5000, 10000, 10000 'ms
+			objXMLhttp.setRequestHeader "Authorization", "Bearer " & API_SECRET
+			If API_REQUEST_DATA = "" Then 
+				objXMLhttp.send
+			Else
+				objXMLhttp.send TurkishCharFix(API_REQUEST_DATA)
+			End If
+
+			'------------------------------------------------
+			' Logla
+			'------------------------------------------------
+			API_REQUEST_HASH	= Uguid()
+			API_RESPONSE_DATA 	= objXMLhttp.responseText
+			CreateLog PLUGIN_CODE, API_REQUEST_DATA, API_RESPONSE_DATA, objXMLhttp.Status, xType
+
+			If objXMLhttp.Status = 200 Then 
+				XMLHttp = Array(objXMLhttp.Status, API_RESPONSE_DATA)
+			Else 
+				On Error Resume Next
+	    		Dim ERROR_TEXT : ERROR_TEXT = ""
+				
+				Set parseJsonData = New aspJSON
+					parseJsonData.loadJSON( API_RESPONSE_DATA )
+		    		
+					If IsNull(parseJsonData.data("error")) = True Then 
+						ERROR_TEXT = "API Bağlantı Hatası"
+					Else
+						LOG_URL 	= ExtractReqId( parseJsonData.data("error").item("request_log_url") )
+						ERROR_TEXT 	= "Message: "& parseJsonData.data("error").item("message") &" Log: "& LOG_URL &""
+					End IF
+				Set parseJsonData = Nothing
+				
+				On Error Goto 0
+				
+				XMLHttp = Array(500, ERROR_TEXT)
+			End If
+	    Set objXMLhttp = Nothing
+
+	    If Err <> 0 Then Response.Write Err.Description
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Private Function ExtractReqId(inputStr)
+        ExtractReqId = ""
+	    
+	    Set regEx = New RegExp
+		    regEx.Pattern = "req_[\w]+"
+		    regEx.IgnoreCase = True
+		    regEx.Global = True
+
+	    Set matches = regEx.Execute(inputStr)
+	    If matches.Count > 0 Then
+	        ExtractReqId = matches(0).Value
+	    End If
+	    Set matches = Nothing
+	    Set regEx = Nothing
+	End Function
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+    Public Property Get AddToCart(ByVal aData)
+        AddToArray USER_CART, aData
+    End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get jsonFormStringify(pData, prefix)
+	    Dim pKey, strResult, tempResult, formattedKey
+	    strResult = ""
+	    
+	    For Each pKey In pData.Keys
+	        ' Anahtar formatını ayarla
+	        If Len(prefix) > 0 Then
+	            formattedKey = prefix & pKey & "]"
+	        Else
+	            formattedKey = pKey
+	        End If
+
+	        If (IsDictionary(pData.Item(pKey))) Then
+	            ' İç içe Dictionary için rekürsif çağrı
+	            tempResult = jsonFormStringify(pData.Item(pKey), formattedKey & "[")
+	            If Len(tempResult) > 0 Then
+	                If Len(strResult) > 0 Then strResult = strResult & "&"
+	                strResult = strResult & tempResult
+	            End If
+	        ElseIf (IsArray(pData.Item(pKey))) Then
+	            ' Array için özel işlem
+	            Dim i
+	            For i = 0 To UBound(pData.Item(pKey))
+	                If Len(strResult) > 0 Then strResult = strResult & "&"
+	                strResult = strResult & jsonFormStringify(pData.Item(pKey)(i), formattedKey & "[" & i & "][")
+	            Next
+	        Else
+	            ' Basit anahtar-değer çifti
+	            If Len(strResult) > 0 Then strResult = strResult & "&"
+	            strResult = strResult & formattedKey & "=" & pData.Item(pKey)
+	        End If
+	    Next
+
+	    jsonFormStringify = strResult
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get IsDictionary(ByVal pDict)
+		IsDictionary = (TypeName(pDict) = "Dictionary")
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+    Private Function fixAmount(varAmount)
+        varAmount = Trim(varAmount) & ""
+        varAmount = Replace(varAmount ,".","",1,-1,1)
+        varAmount = Replace(varAmount ,",","",1,-1,1)
+        varAmount = Replace(varAmount ," ","",1,-1,1)
+        varAmount = Replace(varAmount ,"TL","",1,-1,1)
+        varAmount = Replace(varAmount ,"TRY","",1,-1,1)
+
+        fixAmount = Clng(varAmount)
+    End Function
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get PaymentMode()
+		PaymentMode = PAYMENT_UI_MODE
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Let PaymentMode(ByVal Val)
+		PAYMENT_UI_MODE = Val
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Private Function TurkishCharFix(ByVal Text)
+	    Dim stream
+	    Set stream = Server.CreateObject("ADODB.Stream")
+		    stream.Open
+		    stream.Charset = "Windows-1254" ' Türkçe karakterler için uygun Charset
+		    stream.WriteText Text
+		    stream.Position = 0
+		    stream.Charset = "UTF-8"
+	    TurkishCharFix = stream.ReadText
+	    stream.Close
+	    Set stream = Nothing
+	End Function
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Public Property Get PublicKey()
+		PublicKey = API_KEY
+	End Property
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+	Private Function GetStripeId(ByVal orderDbId)
+		GetStripeId = Array(0,0)
+
+		If IsNumericalAndNotZero(orderDbId) = False Then 
+	        Exit Function
+		End If
+
+		Set Kontrol = Conn.Execute("SELECT ID, STRIPE_ID FROM "& PluginDBTable() &" WHERE ORDER_ID='"& orderDbId &"'")
+		If Not Kontrol.Eof Then 
+			GetStripeId = Array(Kontrol("STRIPE_ID").Value, Kontrol("ID").Value)
+		End If 
+		Kontrol.Close : Set Kontrol = Nothing
+	End Function
+	'/*
+	'---------------------------------------------------------------
+	' 
+	'---------------------------------------------------------------
+	'*/
+
+	' Private Function GetStripeId(ByVal orderDbId, ByVal OrderNo)
+	' 	Query.PageContentType = "json"
+
+	' 	If IsNumericalAndNotZero(orderDbId) = False Then 
+	'         Query.jsonResponse 500, "Geçersiz Sipariş Numarası"
+	'         Call SystemTeardown("destroy")
+	' 	End If
+
+	' 	Set Kontrol = Conn.Execute("SELECT STRIPE_ID FROM "& PluginDBTable() &" WHERE ORDER_ID='"& orderDbId &"' AND ORDER_NO='"& OrderNo &"'")
+	' 	If Kontrol.Eof Then 
+	'         Query.jsonResponse 404, "Stripe ID Bulunamadı!"
+	' 	Else 
+		
+	' 	End If 
+	' 	Kontrol.Close : Set Kontrol = Nothing
+	' End Function
+End Class 
+%>
